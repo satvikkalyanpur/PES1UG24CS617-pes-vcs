@@ -189,8 +189,27 @@ int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_
     rewind(f);
 
     char *buffer = malloc(size);
-    fread(buffer, 1, size, f);
+if (!buffer) {
     fclose(f);
+    return -1;
+}
+
+if (fread(buffer, 1, size, f) != size) {
+    free(buffer);
+    fclose(f);
+    return -1;
+}
+
+fclose(f);
+
+// ✅ ADD INTEGRITY CHECK HERE
+ObjectID check;
+compute_hash(buffer, size, &check);
+
+if (memcmp(check.hash, id->hash, HASH_SIZE) != 0) {
+    free(buffer);
+    return -1;
+}
 
     char *null_pos = memchr(buffer, '\0', size);
     if (!null_pos) return -1;
@@ -199,6 +218,10 @@ int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_
     size_t data_size;
 
     sscanf(buffer, "%s %zu", type_str, &data_size);
+    if (data_size + (null_pos - buffer + 1) != size) {
+    free(buffer);
+    return -1;
+}
 
     if (strcmp(type_str, "blob") == 0) *type_out = OBJ_BLOB;
     else if (strcmp(type_str, "tree") == 0) *type_out = OBJ_TREE;
@@ -212,11 +235,5 @@ int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_
 
     free(buffer);
     return 0;
-    ObjectID check;
-compute_hash(buffer, size, &check);
-
-if (memcmp(check.hash, id->hash, HASH_SIZE) != 0) {
-    free(buffer);
-    return -1;
-}
+    
 }
