@@ -202,3 +202,14 @@ int commit_create(const char *message, ObjectID *out_id)
     int has_parent = (head_read(&parent) == 0);
 
     const char *author = pes_author()
+    Commit c;
+    memset(&c, 0, sizeof(c));
+
+    c.tree = tree_id;
+
+    if (has_parent)
+        c.parent = parent;
+
+    strncpy(c.author, author, sizeof(c.author) - 1);
+    strncpy(c.message, message, sizeof(c.message) - 1);
+
