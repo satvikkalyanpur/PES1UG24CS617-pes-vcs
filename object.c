@@ -94,17 +94,17 @@ int object_exists(const ObjectID *id) {
 //
 // Returns 0 on success, -1 on error.
 
-int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out) {
-
-    const char *type_str;
-    if (type == OBJ_BLOB) type_str = "blob";
-    else if (type == OBJ_TREE) type_str = "tree";
-    else type_str = "commit";
+int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out)
+{
+    const char *type_str =
+        (type == OBJ_BLOB) ? "blob" :
+        (type == OBJ_TREE) ? "tree" : "commit";
 
     char header[64];
     int header_len = snprintf(header, sizeof(header), "%s %zu", type_str, len) + 1;
 
     size_t total_len = header_len + len;
+
     char *buffer = malloc(total_len);
     if (!buffer) return -1;
 
@@ -123,25 +123,35 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
     char path[512];
     object_path(&id, path, sizeof(path));
 
+    // FIX: extract shard directory safely
     char dir[512];
     snprintf(dir, sizeof(dir), "%s/%.2s", OBJECTS_DIR, path + strlen(OBJECTS_DIR) + 1);
+
+    mkdir(OBJECTS_DIR, 0755);
     mkdir(dir, 0755);
 
     char temp_path[512];
     snprintf(temp_path, sizeof(temp_path), "%s.tmp", path);
 
     int fd = open(temp_path, O_CREAT | O_WRONLY | O_TRUNC, 0644);
-    if (fd < 0) return -1;
+    if (fd < 0) {
+        free(buffer);
+        return -1;
+    }
 
-    if ((size_t)write(fd, buffer, total_len) != total_len) {
+    if (write(fd, buffer, total_len) != (ssize_t)total_len) {
         close(fd);
+        free(buffer);
         return -1;
     }
 
     fsync(fd);
     close(fd);
 
-    rename(temp_path, path);
+    if (rename(temp_path, path) != 0) {
+        free(buffer);
+        return -1;
+    }
 
     int dir_fd = open(dir, O_DIRECTORY);
     if (dir_fd >= 0) {
