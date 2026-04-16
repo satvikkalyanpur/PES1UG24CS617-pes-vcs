@@ -16,6 +16,8 @@
 // TODO functions:     index_load, index_save, index_add
 
 #include "index.h"
+#include "tree.h"
+#include "object.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -60,7 +62,7 @@ int index_remove(Index *index, const char *path) {
 int index_status(const Index *index) {
     printf("Staged changes:\n");
     int staged_count = 0;
-    // Note: A true Git implementation deeply diffs against the HEAD tree here. 
+    // Note: A true Git implementation deeply diffs against the HEAD tree here.
     // For this lab, displaying indexed files represents the staging intent.
     for (int i = 0; i < index->count; i++) {
         printf("  staged:     %s\n", index->entries[i].path);
@@ -103,11 +105,11 @@ int index_status(const Index *index) {
             int is_tracked = 0;
             for (int i = 0; i < index->count; i++) {
                 if (strcmp(index->entries[i].path, ent->d_name) == 0) {
-                    is_tracked = 1; 
+                    is_tracked = 1;
                     break;
                 }
             }
-            
+
             if (!is_tracked) {
                 struct stat st;
                 stat(ent->d_name, &st);
@@ -138,29 +140,35 @@ int index_load(Index *index) {
     index->count = 0;
 
     FILE *f = fopen(INDEX_FILE, "r");
-    if (!f) return 0; // empty index is valid
+    if (!f) {
+        return 0;
+    }
 
     while (index->count < MAX_INDEX_ENTRIES) {
         IndexEntry *e = &index->entries[index->count];
 
         char hash_hex[HASH_HEX_SIZE + 1];
 
-        if (fscanf(f, "%o %64s %u %u %255s",
-                   &e->mode,
-                   hash_hex,
-                   &e->mtime_sec,
-                   &e->size,
-                   e->path) != 5) {
-            break;
+        int ret = fscanf(f, "%o %64s %lu %u %511s\n", &e->mode, hash_hex, &e->mtime_sec, &e->size, e->path);
+
+        if (ret != 5) break;
+
+        if (hex_to_hash(hash_hex, &e->hash) != 0) {
+            fclose(f);
+            return -1;
         }
 
-        hex_to_hash(hash_hex, &e->hash);
         index->count++;
     }
 
     fclose(f);
     return 0;
 }
+
+static int compare_index_entries(const void *a, const void *b) {
+    return strcmp(((IndexEntry *)a)->path, ((IndexEntry *)b)->path);
+}
+
 // Save the index to .pes/index atomically.
 //
 // HINTS - Useful functions and syscalls:
@@ -171,36 +179,31 @@ int index_load(Index *index) {
 //   - rename                           : atomically moving the temp file over the old index
 //
 // Returns 0 on success, -1 on error.
-int compare_index_entries(const void *a, const void *b) {
-    return strcmp(((IndexEntry*)a)->path, ((IndexEntry*)b)->path);
-}
-
 int index_save(const Index *index) {
+    Index *copy = malloc(sizeof(Index));
+    if (!copy) return -1;
+
+    memcpy(copy, index, sizeof(Index));
+
+    qsort(copy->entries, copy->count, sizeof(IndexEntry), compare_index_entries);
+
     FILE *f = fopen(INDEX_FILE ".tmp", "w");
     if (!f) return -1;
 
-    Index sorted = *index;
-    qsort(sorted.entries, sorted.count, sizeof(IndexEntry), compare_index_entries);
-
-    for (int i = 0; i < sorted.count; i++) {
-        const IndexEntry *e = &sorted.entries[i];
-
+    for (int i = 0; i < copy->count; i++) {
         char hex[HASH_HEX_SIZE + 1];
-        hash_to_hex(&e->hash, hex);
+        hash_to_hex(&copy->entries[i].hash, hex);
 
-        fprintf(f, "%o %s %u %u %s\n",
-                e->mode,
-                hex,
-                e->mtime_sec,
-                e->size,
-                e->path);
+        fprintf(f, "%o %s %lu %u %s\n", copy->entries[i].mode, hex, copy->entries[i].mtime_sec, copy->entries[i].size, copy->entries[i].path);
     }
 
+    free(copy);
     fflush(f);
     fsync(fileno(f));
     fclose(f);
 
     rename(INDEX_FILE ".tmp", INDEX_FILE);
+
     return 0;
 }
 
@@ -214,7 +217,6 @@ int index_save(const Index *index) {
 //
 // Returns 0 on success, -1 on error.
 int index_add(Index *index, const char *path) {
-
     FILE *f = fopen(path, "rb");
     if (!f) return -1;
 
@@ -222,48 +224,40 @@ int index_add(Index *index, const char *path) {
     size_t size = ftell(f);
     rewind(f);
 
-    if (size == 0) {
+    void *buf = malloc(size ? size : 1);
+    if (!buf) {
         fclose(f);
         return -1;
     }
 
-    void *buffer = malloc(size);
-    if (!buffer) {
-        fclose(f);
-        return -1;
-    }
-
-    if (fread(buffer, 1, size, f) != size) {
-        fclose(f);
-        free(buffer);
-        return -1;
-    }
+    fread(buf, 1, size, f);
     fclose(f);
 
     ObjectID id;
-    if (object_write(OBJ_BLOB, buffer, size, &id) != 0) {
-        free(buffer);
+    if (object_write(OBJ_BLOB, buf, size, &id) != 0) {
+        free(buf);
         return -1;
     }
 
-    free(buffer);
+    free(buf);
 
     struct stat st;
     if (stat(path, &st) != 0) return -1;
 
     IndexEntry *e = index_find(index, path);
-
     if (!e) {
-        if (index->count >= MAX_INDEX_ENTRIES) return -1;
+        if (index->count >= MAX_INDEX_ENTRIES) {
+            return -1;
+        }
         e = &index->entries[index->count++];
     }
 
-    e->mode = st.st_mode;
+    e->mode = get_file_mode(path);
+    e->hash = id;
     e->mtime_sec = st.st_mtime;
     e->size = st.st_size;
-    e->hash = id;
-
-    snprintf(e->path, sizeof(e->path), "%s", path);
+    strncpy(e->path, path, sizeof(e->path) - 1);
+    e->path[sizeof(e->path) - 1] = '\0';
 
     return index_save(index);
 }

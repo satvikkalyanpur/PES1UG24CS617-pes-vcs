@@ -67,7 +67,14 @@ int commit_parse(const void *data, size_t len, Commit *commit_out) {
     p = strchr(p, '\n') + 1;  // skip committer line
     p = strchr(p, '\n') + 1;  // skip blank line
 
-    snprintf(commit_out->message, sizeof(commit_out->message), "%s", p);
+    size_t remaining = (const char *)data + len - p;
+
+    if (remaining >= sizeof(commit_out->message)) {
+        remaining = sizeof(commit_out->message) - 1;
+    }
+
+    memcpy(commit_out->message, p, remaining);
+    commit_out->message[remaining] = '\0';
     return 0;
 }
 
@@ -164,18 +171,18 @@ int head_update(const ObjectID *new_commit) {
 
     char tmp_path[528];
     snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", target_path);
-    
+
     f = fopen(tmp_path, "w");
     if (!f) return -1;
-    
+
     char hex[HASH_HEX_SIZE + 1];
     hash_to_hex(new_commit, hex);
     fprintf(f, "%s\n", hex);
-    
+
     fflush(f);
     fsync(fileno(f));
     fclose(f);
-    
+
     return rename(tmp_path, target_path);
 }
 
@@ -193,45 +200,44 @@ int head_update(const ObjectID *new_commit) {
 //   - head_update       : moves the branch pointer to your new commit
 //
 // Returns 0 on success, -1 on error.
-int commit_create(const char *message, ObjectID *out_id)
-{
+int commit_create(const char *message, ObjectID *commit_id_out) {
     ObjectID tree_id;
-    if (tree_from_index(&tree_id) != 0)
-        return -1;
-    ObjectID parent;
-    int has_parent = (head_read(&parent) == 0);
+    if (tree_from_index(&tree_id) != 0) return -1;
 
-    const char *author = pes_author()
     Commit c;
-    memset(&c, 0, sizeof(c));
+    memset(&c, 0, sizeof(Commit));
 
     c.tree = tree_id;
 
-    if (has_parent)
-        c.parent = parent;
+    if (head_read(&c.parent) == 0) {
+        c.has_parent = 1;
+    } else {
+        c.has_parent = 0;
+    }
 
-    strncpy(c.author, author, sizeof(c.author) - 1);
-    strncpy(c.message, message, sizeof(c.message) - 1);
-    c.timestamp = time(NULL);
+    snprintf(c.author, sizeof(c.author), "%s", pes_author());
+    c.timestamp = (uint64_t)time(NULL);
+    snprintf(c.message, sizeof(c.message), "%s", message);
 
     void *data;
     size_t len;
 
-    if (commit_serialize(&c, &data, &len) != 0)
-        return -1;
+    if (commit_serialize(&c, &data, &len) != 0) return -1;
 
-    ObjectID commit_id;
-    if (object_write(OBJ_COMMIT, data, len, &commit_id) != 0) {
+    if (object_write(OBJ_COMMIT, data, len, commit_id_out) != 0) {
         free(data);
         return -1;
     }
+
     free(data);
 
-    head_update(&commit_id);
+    if (head_update(commit_id_out) != 0) {
+        return -1;
+    }
 
-    if (out_id)
-        *out_id = commit_id;
+    char hex[HASH_HEX_SIZE + 1];
+    hash_to_hex(commit_id_out, hex);
+    printf("[%s] %s\n", hex, message);
 
     return 0;
 }
-
