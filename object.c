@@ -212,4 +212,11 @@ int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_
 
     free(buffer);
     return 0;
+    ObjectID check;
+compute_hash(buffer, size, &check);
+
+if (memcmp(check.hash, id->hash, HASH_SIZE) != 0) {
+    free(buffer);
+    return -1;
+}
 }
