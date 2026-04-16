@@ -103,15 +103,55 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
 
     char header[64];
     int header_len = snprintf(header, sizeof(header), "%s %zu", type_str, len) + 1;
-size_t total_len = header_len + len;
-char *buffer = malloc(total_len);
 
-memcpy(buffer, header, header_len);
-memcpy(buffer + header_len, data, len);
+    size_t total_len = header_len + len;
+    char *buffer = malloc(total_len);
+    if (!buffer) return -1;
 
-ObjectID id;
-compute_hash(buffer, total_len, &id);
-    return -1;
+    memcpy(buffer, header, header_len);
+    memcpy(buffer + header_len, data, len);
+
+    ObjectID id;
+    compute_hash(buffer, total_len, &id);
+
+    if (object_exists(&id)) {
+        *id_out = id;
+        free(buffer);
+        return 0;
+    }
+
+    char path[512];
+    object_path(&id, path, sizeof(path));
+
+    char dir[512];
+    snprintf(dir, sizeof(dir), "%s/%.2s", OBJECTS_DIR, path + strlen(OBJECTS_DIR) + 1);
+    mkdir(dir, 0755);
+
+    char temp_path[512];
+    snprintf(temp_path, sizeof(temp_path), "%s.tmp", path);
+
+    int fd = open(temp_path, O_CREAT | O_WRONLY | O_TRUNC, 0644);
+    if (fd < 0) return -1;
+
+    if ((size_t)write(fd, buffer, total_len) != total_len) {
+        close(fd);
+        return -1;
+    }
+
+    fsync(fd);
+    close(fd);
+
+    rename(temp_path, path);
+
+    int dir_fd = open(dir, O_DIRECTORY);
+    if (dir_fd >= 0) {
+        fsync(dir_fd);
+        close(dir_fd);
+    }
+
+    *id_out = id;
+    free(buffer);
+    return 0;
 }
 
 // Read an object from the store.
