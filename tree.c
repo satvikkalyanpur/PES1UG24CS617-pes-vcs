@@ -147,5 +147,12 @@ int tree_from_index(ObjectID *id_out) {
         // Extract filename (ignore directories for now)
         const char *name = strrchr(e->path, '/');
         if (name) name++; else name = e->path;
+         strncpy(te->name, name, sizeof(te->name));
 
+        // Copy hash from index
+        te->hash = e->hash;
+    }
+
+    void *data;
+    size_t len;
 }
