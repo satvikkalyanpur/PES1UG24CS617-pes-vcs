@@ -198,3 +198,7 @@ int commit_create(const char *message, ObjectID *out_id)
     ObjectID tree_id;
     if (tree_from_index(&tree_id) != 0)
         return -1;
+    ObjectID parent;
+    int has_parent = (head_read(&parent) == 0);
+
+    const char *author = pes_author()
