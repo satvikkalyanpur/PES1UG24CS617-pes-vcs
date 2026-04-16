@@ -141,4 +141,11 @@ int tree_from_index(ObjectID *id_out) {
 
         TreeEntry *te = &tree.entries[tree.count++]; 
 
+        // Set mode (file only for now)
+        te->mode = MODE_FILE;
+
+        // Extract filename (ignore directories for now)
+        const char *name = strrchr(e->path, '/');
+        if (name) name++; else name = e->path;
+
 }
