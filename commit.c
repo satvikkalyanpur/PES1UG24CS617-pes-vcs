@@ -212,4 +212,18 @@ int commit_create(const char *message, ObjectID *out_id)
 
     strncpy(c.author, author, sizeof(c.author) - 1);
     strncpy(c.message, message, sizeof(c.message) - 1);
+    c.timestamp = time(NULL);
+
+    void *data;
+    size_t len;
+
+    if (commit_serialize(&c, &data, &len) != 0)
+        return -1;
+
+    ObjectID commit_id;
+    if (object_write(OBJ_COMMIT, data, len, &commit_id) != 0) {
+        free(data);
+        return -1;
+    }
+
 
