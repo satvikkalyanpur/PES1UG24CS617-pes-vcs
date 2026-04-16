@@ -133,6 +133,12 @@ int tree_from_index(ObjectID *id_out) {
 
     Index index;
     if (index_load(&index) != 0) return -1;
+    Tree tree;
+    tree.count = 0;
 
+    for (size_t i = 0; i < index.count; i++) {
+        IndexEntry *e = &index.entries[i];
+
+        TreeEntry *te = &tree.entries[tree.count++]; 
 
 }
