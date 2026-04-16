@@ -1,6 +1,5 @@
 #include "index.h"
-#include "object.h"   // 🔥 THIS WAS MISSING (CAUSE OF SEGFAULT)
-
+#include "pesu.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
